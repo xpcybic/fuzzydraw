@@ -15,6 +15,7 @@ void cleanup()
 {
 	if (imgfilein != NULL)
 		fclose(imgfilein);
+	/*
 	if (img != NULL)
 		gdImageDestroy(img);
 	if (imgplt != NULL)
@@ -23,6 +24,7 @@ void cleanup()
 		gdImageDestroy(imgout1);
 	if (imgout2 != NULL)
 		gdImageDestroy(imgout2);
+	*/
 }
 
 int main(int argc, char *argv[])
@@ -31,8 +33,6 @@ int main(int argc, char *argv[])
 
 	char *imgfileinname = NULL;
 	char *imgfileoutname = NULL;
-	int dither = 1;
-	int palsize = 8;
 
 	//arg handling
 	if (argc < 2)
@@ -45,26 +45,14 @@ int main(int argc, char *argv[])
 	imgfileinname = argv[1];
 	imgfileoutname = "gdout.png";	//TODO: copy input file format?
 	imgfilein = fopen(imgfileinname, "rb");
-	imgfileout = fopen(imgfileoutname, "wb");
-	if (imgfilein == NULL || imgfileout == NULL)
+	if (imgfilein == NULL)
 	{
 		fprintf(stderr, "Error opening %s: %s\n", imgfileinname, strerror(errno));
 		exit(2);
 	}
 
 	printf("Reading %s...\n", imgfileinname);
-	//printf("Output filename will be %s.\n", imgfileoutname);
+	printf("Output filename will be %s.\n", imgfileoutname);
 
-	img = gdImageCreateFromPng(imgfilein);
-
-	imgplt = gdImageCreatePaletteFromTrueColor(img, dither, palsize);
-	if (imgplt == NULL)
-	{
-		fprintf(stderr, "Error creating %s\n", imgfileoutname);
-		exit(3);
-	}
-	gdImagePng(imgplt, imgfileout);
-
-	printf("Done.\n");
 	return 0;
 }
