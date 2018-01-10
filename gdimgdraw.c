@@ -6,10 +6,9 @@
 #include <linux/limits.h>
 #include "gd.h"
 
-#define DEBUG 1
-
 #define ERR_NO_IMG_ARG 1
 #define ERR_FILE_HANDLE 2
+#define ERR_FTYPE 3
 #define ERR_MEM 255
 
 //red/green/blue components of a color
@@ -17,8 +16,7 @@
 #define GCOMP(c) ((c >> 8) & 0Xff)
 #define BCOMP(c) ((c >> 0) & 0Xff)
 
-#define ITERS_DEFAULT 1000
-//#define ITERS_DEFAULT (gdImageSX(img) * gdImageSY(img))
+#define ITERS_DEFAULT (gdImageSX(imgin) * gdImageSY(imgin) / 2)
 
 //gdRect (x y width height)
 
@@ -27,23 +25,21 @@ FILE *imgfilein = NULL;
 //final output image file (create it at the end)
 FILE *imgfileout = NULL;
 //data for input image
-gdImagePtr img = NULL;
-//constructed image palette
-int *pal = NULL;
+gdImagePtr imgin = NULL;
 //working images
 gdImagePtr imgout1 = NULL;
 gdImagePtr imgout2 = NULL;
-//dimensions of area in which to draw shapes and do color comparisons
-//int drawrectX, drawrectY, drawrectW, drawrectH
+////constructed image palette
+//int *pal = NULL;
 
 void cleanup()
 {
-	if (pal != NULL)
-		free(pal);
+	//if (pal != NULL)
+		//free(pal);
 	if (imgfilein != NULL)
 		fclose(imgfilein);
-	if (img != NULL)
-		gdImageDestroy(img);
+	if (imgin != NULL)
+		gdImageDestroy(imgin);
 	if (imgout1 != NULL)
 		gdImageDestroy(imgout1);
 	if (imgout2 != NULL)
@@ -133,11 +129,20 @@ int main(int argc, char *argv[])
 	srand(time(NULL));
 	time_t start, end;
 	//input/output filenames
-	char *imgfileinname, *imgfileoutname;
-	imgfileoutname = malloc(NAME_MAX);
+	char *imgfileinname, imgfileoutname[NAME_MAX];
 	//size_t palsz = 0;
-	//number of iterations i.e. how many objects to draw
+	//number of draw iterations; how many circles/shapes to attempt to draw
 	int iters;
+	//color of draw circle
+	int color = 0x00000000;
+	//coords and radius of circle
+	int	x, y, r;
+	//upper-left of circle region
+	int x1, y1;
+	//width/height of circle region
+	int w, h;
+	//number of unsuccessful draws
+	int draws = 0;
 
 	//arg handling
 	if (argc < 2)
@@ -148,53 +153,43 @@ int main(int argc, char *argv[])
 
 	//get filename and open file
 	imgfileinname = argv[1];
-	//char *ftype = strrchr(imgfileinname, '.');
-	snprintf(imgfileoutname, NAME_MAX, "gdout-%d.png", (unsigned)time(NULL));
-	imgfilein = fopen(imgfileinname, "rb");
-	if (imgfilein == NULL)
+	if (!gdSupportsFileType(imgfileinname, 0))
 	{
-		fprintf(stderr, "Error opening input file %s: %s\n", imgfileinname, strerror(errno));
-		exit(ERR_FILE_HANDLE);
+		fprintf(stderr, "Unsupported input file.\n");
+		exit(ERR_FTYPE);
 	}
+	snprintf(imgfileoutname, NAME_MAX, "gdout-%d.png", (unsigned)time(NULL));
 
 	//get input image and create outputs
 	printf("Reading %s...\n", imgfileinname);
-	img = gdImageCreateFromPng(imgfilein);
-	if (img == NULL)
+	imgin = gdImageCreateFromFile(imgfileinname);
+	imgout1 = gdImageCreateTrueColor(gdImageSX(imgin), gdImageSY(imgin));
+	imgout2 = gdImageCreateTrueColor(gdImageSX(imgin), gdImageSY(imgin));
+	if (imgin == NULL || imgout1 == NULL || imgout2 == NULL)
 	{
 		fprintf(stderr, "Out of memory\n");
 		exit(ERR_MEM);
 	}
+
+	//palsz = getpalettelist(imgin, pal);
+	//pal = realloc(pal, palsz);
+	//showpalette(pal, palsz);
 
 	iters = ITERS_DEFAULT;
 	printf("Defaulting to %d iterations.\n", iters);
 
-	imgout1 = gdImageCreateTrueColor(gdImageSX(img), gdImageSY(img));
-	imgout2 = gdImageCreateTrueColor(gdImageSX(img), gdImageSY(img));
-	if (imgout1 == NULL || imgout2 == NULL)
-	{
-		fprintf(stderr, "Out of memory\n");
-		exit(ERR_MEM);
-	}
-
-	//palsz = getpalettelist(img, pal);
-	//pal = realloc(pal, palsz);
-	//showpalette(pal, palsz);
-
-	int color = 0x00000000;
-	int i, x, y, x1, y1, r, w, h;
-
+	printf("Drawing...\n");
 	start = clock();
-	for (i = 0; i < iters; i++)
+	for (int i = 0; i < iters; i++)
 	{
 		//get a color at a random coord
-		x = rand() % gdImageSX(img);
-		y = rand() % gdImageSY(img);
-		color = gdImageGetTrueColorPixel(img, x, y);
+		x = rand() % gdImageSX(imgin);
+		y = rand() % gdImageSY(imgin);
+		color = gdImageGetTrueColorPixel(imgin, x, y);
 
 		//paint a circle of that color at another random coord
-		x = rand() % gdImageSX(img);
-		y = rand() % gdImageSY(img);
+		x = rand() % gdImageSX(imgin);
+		y = rand() % gdImageSY(imgin);
 		r = rand() % 35 + 5;
 		gdImageFilledEllipse(imgout1, x, y, r, r, color);
 
@@ -205,17 +200,25 @@ int main(int argc, char *argv[])
 		h = r;
 		if (x1<0) x1 = 0;
 		if (y1<0) y1 = 0;
-		if ((x1 + w) > gdImageSX(img)) w = (gdImageSX(img) - x1);
-		if ((y1 + h) > gdImageSX(img)) h = (gdImageSX(img) - y1);
-		if (regiondist(imgout1, img, x1, y1, (r*2), (r*2)) < regiondist(imgout2, img, x1, y1, (r*2), (r*2)))
+		if ((x1 + w) > gdImageSX(imgin)) w = (gdImageSX(imgin) - x1);
+		if ((y1 + h) > gdImageSX(imgin)) h = (gdImageSX(imgin) - y1);
+
+		if (regiondist(imgout1, imgin, x1, y1, (r*2), (r*2)) < regiondist(imgout2, imgin, x1, y1, (r*2), (r*2)))
+		{
+			//save this draw
 			imgCopy(imgout1, imgout2, x1, y1, (r*2), (r*2));
+			draws++;
+		}
 		else
+		{
+			//roll back to previous
 			imgCopy(imgout2, imgout1, x1, y1, (r*2), (r*2));
+		}
 	}
 
 	//write final image to file
-#if DEBUG
-	imgfileoutname = "(temp)";
+#ifdef DEBUG
+	sprintf(imgfileoutname, "(temp)");
 #else
 	imgfileout = fopen(imgfileoutname, "wb");
 	if (imgfileout == NULL)
@@ -227,13 +230,17 @@ int main(int argc, char *argv[])
 #endif
 
 	end = clock();
-	printf("Finished drawing %s in %ldms.\n", imgfileoutname, (end - start) * 1000 / CLOCKS_PER_SEC);
+	printf("Finished drawing %s in %.3fs.\n%d successful and %d failed draws (%2.2f%% success rate).\n",
+			imgfileoutname,
+			(double)(end - start) / CLOCKS_PER_SEC,
+			draws,
+			(iters - draws),
+			(double)draws/iters*100);
 
 	/* bad palette reading code here
 	//preallocate for palette storage - this is very excessive and could be done dynamically
-	pal = calloc((gdImageSX(img) * gdImageSY(img)), sizeof(int));
+	pal = calloc((gdImageSX(imgin) * gdImageSY(imgin)), sizeof(int));
 	*/
 
-	printf("Done.\n");
 	return 0;
 }
