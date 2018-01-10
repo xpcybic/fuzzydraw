@@ -5,8 +5,8 @@ gdimgdraw: gdimgdraw.c
 	$(CC) -o $@ $? $(CFLAGS)
 
 debug: gdimgdraw.c
-	$(CC) -o gdimgdraw $? $(CFLAGS) -DDEBUG -g
+	$(CC) -o gdimgdraw $? $(CFLAGS) -DDEBUG -g -pg -no-pie -fPIC
 
 .PHONY: clean
 clean:
-	rm -f gdimgdraw
+	rm -f gdimgdraw gmon.out

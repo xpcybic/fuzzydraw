@@ -17,6 +17,10 @@
 #define BCOMP(c) ((c >> 0) & 0Xff)
 
 #define ITERS_DEFAULT (gdImageSX(imgin) * gdImageSY(imgin) / 2)
+//resolution at which to check regional color distance (check every xth pixel)
+//increase value to improve performance while losing quality
+//diminishing returns above ~4
+#define DIST_RES 1
 
 //gdRect (x y width height)
 
@@ -105,9 +109,9 @@ int dist(int a, int b)
 int regiondist(gdImagePtr img1, gdImagePtr img2, int subx, int suby, int subw, int subh)
 {
 	int distsum = 0;
-	for (int x = subx; x < subx + subw; x++)
+	for (int x = subx; x < subx + subw; x += DIST_RES)
 	{
-		for (int y = suby; y < suby + subh; y++)
+		for (int y = suby; y < suby + subh; y += DIST_RES)
 		{
 			distsum += dist(gdImageGetTrueColorPixel(img1, x, y),
 							gdImageGetTrueColorPixel(img2, x, y));
@@ -190,7 +194,7 @@ int main(int argc, char *argv[])
 		//paint a circle of that color at another random coord
 		x = rand() % gdImageSX(imgin);
 		y = rand() % gdImageSY(imgin);
-		r = rand() % 35 + 5;
+		r = rand() % 26 + 5;
 		gdImageFilledEllipse(imgout1, x, y, r, r, color);
 
 		//compare current and previous to original and keep the closer of the two
