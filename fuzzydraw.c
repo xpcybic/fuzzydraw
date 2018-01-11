@@ -22,8 +22,6 @@
 //diminishing returns above ~4
 #define DIST_RES 1
 
-//gdRect (x y width height)
-
 //original image file (don't apply edits to it)
 FILE *imgfilein = NULL;
 //final output image file (create it at the end)
@@ -90,10 +88,10 @@ void showpalette(int *pal, size_t palsz)
 //gdImageFilledEllipse(img, mx, my, w, h, c)
 //gdImageFilledRectangle(img, x1, y1, x2, y2, color)
 //gdImageLine(img, x1, y1, x2, y2, color)
-void drawshape(void *shapefunc(gdImagePtr, int, int, int, int, int), gdImagePtr *img, int x1, int y1, int x2, int y2)
-{
-
-}
+//void drawshape(void *shapefunc(gdImagePtr, int, int, int, int, int), gdImagePtr *img, int x1, int y1, int x2, int y2)
+//{
+//
+//}
 
 //squared euclidean distance between two ints (colors)
 int dist(int a, int b)
@@ -109,9 +107,11 @@ int dist(int a, int b)
 int regiondist(gdImagePtr img1, gdImagePtr img2, int subx, int suby, int subw, int subh)
 {
 	int distsum = 0;
-	for (int x = subx; x < subx + subw; x += DIST_RES)
+	int subxr = subx + subw;
+	int subyr = suby + subh;
+	for (int x = subx; x < subxr; x += DIST_RES)
 	{
-		for (int y = suby; y < suby + subh; y += DIST_RES)
+		for (int y = suby; y < subyr; y += DIST_RES)
 		{
 			distsum += dist(gdImageGetTrueColorPixel(img1, x, y),
 							gdImageGetTrueColorPixel(img2, x, y));
@@ -162,7 +162,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Unsupported input file.\n");
 		exit(ERR_FTYPE);
 	}
-	snprintf(imgfileoutname, NAME_MAX, "gdout-%d.png", (unsigned)time(NULL));
+	snprintf(imgfileoutname, NAME_MAX, "out-%d.png", (unsigned)time(NULL));
 
 	//get input image and create outputs
 	printf("Reading %s...\n", imgfileinname);
@@ -202,6 +202,7 @@ int main(int argc, char *argv[])
 		y1 = (y-r);
 		w = (r*2);
 		h = r;
+		//clip region to image edges
 		if (x1<0) x1 = 0;
 		if (y1<0) y1 = 0;
 		if ((x1 + w) > gdImageSX(imgin)) w = (gdImageSX(imgin) - x1);
