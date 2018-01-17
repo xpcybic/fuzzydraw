@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <unistd.h>
 #include <string.h>
 #include <math.h>
 #include <errno.h>
@@ -6,7 +7,7 @@
 #include <linux/limits.h>
 #include "gd.h"
 
-#define ERR_NO_IMG_ARG 1
+#define ERR_ARGS 1
 #define ERR_FILE_HANDLE 2
 #define ERR_FTYPE 3
 #define ERR_MEM 255
@@ -17,10 +18,19 @@
 #define BCOMP(c) ((c >> 0) & 0Xff)
 
 #define ITERS_DEFAULT (gdImageSX(imgin) * gdImageSY(imgin) / 2)
-//resolution at which to check regional color distance (check every xth pixel)
-//increase value to improve performance while losing quality
-//diminishing returns above ~4
-#define DIST_RES 1
+#define DIST_RES_DEFAULT 1
+
+#define HELPTEXT \
+	"Usage: fuzzydraw [options] <file>\n"						\
+	"Options:\n"												\
+	"-h: Print this help message\n"								\
+	"-i: Number of iterations\n"								\
+	"-m: Randomization mode:\n"									\
+	"  0 Match colors from original image\n"					\
+	"  1 Sample colors from original image\n"					\
+	"  2 Use random colors\n"									\
+	"-o: Output filename\n"										\
+	"-q: Output image quality reduction (1-10; default 1)\n"
 
 //original image file (don't apply edits to it)
 FILE *imgfilein = NULL;
@@ -83,12 +93,13 @@ void showpalette(int *pal, size_t palsz)
 	printf("\n");
 }
 
-//given some coordinates, pick a color and draw a shape onto the specified canvas.
-//shapefunc can be one of the following:
-//gdImageFilledEllipse(img, mx, my, w, h, c)
-//gdImageFilledRectangle(img, x1, y1, x2, y2, color)
-//gdImageLine(img, x1, y1, x2, y2, color)
-//void drawshape(void *shapefunc(gdImagePtr, int, int, int, int, int), gdImagePtr *img, int x1, int y1, int x2, int y2)
+/*given some coordinates, pick a color and draw a shape onto the specified canvas.
+ * shapefunc can be one of the following:
+ * gdImageFilledEllipse(img, mx, my, w, h, c)
+ * gdImageFilledRectangle(img, x1, y1, x2, y2, color)
+ * gdImageLine(img, x1, y1, x2, y2, color)
+ * void drawshape(void *shapefunc(gdImagePtr, int, int, int, int, int), gdImagePtr *img, int x1, int y1, int x2, int y2)
+ */
 //{
 //
 //}
@@ -104,14 +115,14 @@ int dist(int a, int b)
 }
 
 //cumulative squared euclidean distance between two rectangular image regions
-int regiondist(gdImagePtr img1, gdImagePtr img2, int subx, int suby, int subw, int subh)
+int regiondist(gdImagePtr img1, gdImagePtr img2, int subx, int suby, int subw, int subh, int distres)
 {
 	int distsum = 0;
 	int subxr = subx + subw;
 	int subyr = suby + subh;
-	for (int x = subx; x < subxr; x += DIST_RES)
+	for (int x = subx; x < subxr; x += distres)
 	{
-		for (int y = suby; y < subyr; y += DIST_RES)
+		for (int y = suby; y < subyr; y += distres)
 		{
 			distsum += dist(gdImageGetTrueColorPixel(img1, x, y),
 							gdImageGetTrueColorPixel(img2, x, y));
@@ -128,48 +139,110 @@ void imgCopy(gdImagePtr src, gdImagePtr dest, int subx, int suby, int subw, int 
 
 int main(int argc, char *argv[])
 {
+	char arg;
 	atexit(cleanup);
 
 	srand(time(NULL));
 	time_t start, end;
 	//input/output filenames
-	char *imgfileinname, imgfileoutname[NAME_MAX];
+	char imgfileinname[NAME_MAX] = "";
+	char imgfileoutname[NAME_MAX] = "";
 	//size_t palsz = 0;
 	//number of draw iterations; how many circles/shapes to attempt to draw
-	int iters;
+	unsigned int iters = 0;
 	//color of draw circle
 	int color = 0x00000000;
 	//coords and radius of circle
-	int	x, y, r;
+	int	drawX, drawY, drawR;
 	//upper-left of circle region
-	int x1, y1;
+	int drawX1, drawY1;
 	//width/height of circle region
-	int w, h;
+	int drawW, drawH;
 	//number of unsuccessful draws
 	int draws = 0;
+	/* Resolution at which to check regional color distance (check every xth
+	 * pixel). Higher values improve performance while losing quality, but at
+	 * too high a value only pixels outside the drawn circle will be checked,
+	 * usually causing dist to report no difference and producing weird images.
+	 */
+	unsigned char distres = DIST_RES_DEFAULT;
+	/* drawing randomization mode:
+	 * 0 = draw with matching colors at matching coords 
+	 * 1 = draw to random coords while sampling colors from original image
+	 * 2 = draw purely random colors to random coords (even random alpha!)
+	 */
+	unsigned char randmode = 1;
 
 	//arg handling
-	if (argc < 2)
+	while ((arg = getopt(argc, argv, "hi:m:o:q:")) != -1)
 	{
-		fprintf(stderr, "Please supply an image filename.\n");
-		exit(ERR_NO_IMG_ARG);
+		switch (arg)
+		{
+			case 'h':
+				printf(HELPTEXT);
+				exit(0);
+				break;
+			case 'i':
+				iters = atoi(optarg);
+				break;
+			case 'm':
+				randmode = atoi(optarg);
+				if (randmode > 2)
+				{
+					fprintf(stderr, "Random mode must be 0-2.\n");
+					exit(ERR_ARGS);
+				}
+				break;
+			case 'o':
+				strncpy(imgfileoutname, optarg, NAME_MAX);
+				break;
+			case 'q':
+				distres = atoi(optarg);
+				if (distres < 1 || distres > 10)
+				{
+					fprintf(stderr, "Image quality must be 1-10.\n");
+					exit(ERR_ARGS);
+				}
+				break;
+			case '?':
+			default:
+				exit(ERR_ARGS);
+		}
 	}
 
 	//get filename and open file
-	imgfileinname = argv[1];
-	if (!gdSupportsFileType(imgfileinname, 0))
+	if (optind < argc)
 	{
-		fprintf(stderr, "Unsupported input file.\n");
-		exit(ERR_FTYPE);
+		strncpy(imgfileinname, argv[optind], NAME_MAX);
+		if (!gdSupportsFileType(imgfileinname, 0))
+		{
+			fprintf(stderr, "Unsupported input file %s.\n", imgfileinname);
+			exit(ERR_FTYPE);
+		}
 	}
-	snprintf(imgfileoutname, NAME_MAX, "out-%d.png", (unsigned)time(NULL));
+	else
+	{
+		fprintf(stderr, "Please supply an image filename.\n");
+		exit(ERR_ARGS);
+	}
+	if (imgfileoutname[0] == '\0')
+	{
+		snprintf(imgfileoutname, NAME_MAX, "out-%d.png", (unsigned)time(NULL));
+		printf("Using default filename %s\n", imgfileoutname);
+	}
 
 	//get input image and create outputs
 	printf("Reading %s...\n", imgfileinname);
 	imgin = gdImageCreateFromFile(imgfileinname);
+	if (imgin == NULL)
+	{
+		fprintf(stderr, "Cannot open file %s: ", imgfileinname);
+		perror("");
+		exit(ERR_FILE_HANDLE);
+	}
 	imgout1 = gdImageCreateTrueColor(gdImageSX(imgin), gdImageSY(imgin));
 	imgout2 = gdImageCreateTrueColor(gdImageSX(imgin), gdImageSY(imgin));
-	if (imgin == NULL || imgout1 == NULL || imgout2 == NULL)
+	if (imgout1 == NULL || imgout2 == NULL)
 	{
 		fprintf(stderr, "Out of memory\n");
 		exit(ERR_MEM);
@@ -179,45 +252,56 @@ int main(int argc, char *argv[])
 	//pal = realloc(pal, palsz);
 	//showpalette(pal, palsz);
 
-	iters = ITERS_DEFAULT;
+	if (iters == 0)
+		iters = ITERS_DEFAULT;
 	printf("Defaulting to %d iterations.\n", iters);
 
 	printf("Drawing...\n");
 	start = clock();
 	for (int i = 0; i < iters; i++)
 	{
+		drawX = rand() % gdImageSX(imgin);
+		drawY = rand() % gdImageSY(imgin);
 		//get a color at a random coord
-		x = rand() % gdImageSX(imgin);
-		y = rand() % gdImageSY(imgin);
-		color = gdImageGetTrueColorPixel(imgin, x, y);
+		if (randmode < 2)
+			color = gdImageGetTrueColorPixel(imgin, drawX, drawY);
+		else
+			color = rand();
 
-		//paint a circle of that color at another random coord
-		x = rand() % gdImageSX(imgin);
-		y = rand() % gdImageSY(imgin);
-		r = rand() % 26 + 5;
-		gdImageFilledEllipse(imgout1, x, y, r, r, color);
+		//paint a circle of that color at another coord (or the same coord)
+		if (randmode > 0)
+		{
+			drawX = rand() % gdImageSX(imgin);
+			drawY = rand() % gdImageSY(imgin);
+		}
+		drawR = rand() % 26 + 5;
+		gdImageFilledEllipse(imgout1, drawX, drawY, drawR, drawR, color);
 
 		//compare current and previous to original and keep the closer of the two
-		x1 = (x-r);
-		y1 = (y-r);
-		w = (r*2);
-		h = r;
+		drawX1 = (drawX-drawR);
+		drawY1 = (drawY-drawR);
+		drawW = (drawR*2);
+		drawH = drawR;
 		//clip region to image edges
-		if (x1<0) x1 = 0;
-		if (y1<0) y1 = 0;
-		if ((x1 + w) > gdImageSX(imgin)) w = (gdImageSX(imgin) - x1);
-		if ((y1 + h) > gdImageSX(imgin)) h = (gdImageSX(imgin) - y1);
+		if (drawX1<0) drawX1 = 0;
+		if (drawY1<0) drawY1 = 0;
+		if ((drawX1 + drawW) > gdImageSX(imgin)) drawW = (gdImageSX(imgin) - drawX1);
+		if ((drawY1 + drawH) > gdImageSX(imgin)) drawH = (gdImageSX(imgin) - drawY1);
 
-		if (regiondist(imgout1, imgin, x1, y1, (r*2), (r*2)) < regiondist(imgout2, imgin, x1, y1, (r*2), (r*2)))
+		//determine if region "looks closer" to original than before
+		if (regiondist(imgout1, imgin,
+					drawX1, drawY1, (drawR*2), (drawR*2), distres)
+				< regiondist(imgout2, imgin,
+					drawX1, drawY1, (drawR*2), (drawR*2), distres))
 		{
 			//save this draw
-			imgCopy(imgout1, imgout2, x1, y1, (r*2), (r*2));
+			imgCopy(imgout1, imgout2, drawX1, drawY1, (drawR*2), (drawR*2));
 			draws++;
 		}
 		else
 		{
 			//roll back to previous
-			imgCopy(imgout2, imgout1, x1, y1, (r*2), (r*2));
+			imgCopy(imgout2, imgout1, drawX1, drawY1, (drawR*2), (drawR*2));
 		}
 	}
 
